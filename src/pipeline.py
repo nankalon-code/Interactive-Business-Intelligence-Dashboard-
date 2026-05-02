@@ -400,7 +400,7 @@ class BIPipeline:
         print(f"   Created {len(self.optimized_views)} materialized views")
     
     def save_to_database(self):
-        """Save all processed data to SQLite - FIXED VERSION"""
+        """Save all processed data to SQLite - FULLY FIXED"""
         conn = sqlite3.connect(os.path.join(self.data_path, 'analytics.db'))
         
         # Save fact and dimension tables
@@ -409,29 +409,42 @@ class BIPipeline:
         self.dim_product.to_sql('dim_product', conn, if_exists='replace', index=False)
         self.dim_date.to_sql('dim_date', conn, if_exists='replace', index=False)
         
-        # Save metrics - FIXED: Convert everything to simple types
+        # Save metrics - Convert everything to simple types
         metrics_list = []
         for k, v in self.results.items():
-            # Skip complex types that cause SQLite errors
             if isinstance(v, (dict, list, pd.Series, pd.DataFrame)):
                 continue
-            # Convert to appropriate type
             if isinstance(v, (int, float, str, bool)):
                 metrics_list.append({'metric_name': k, 'metric_value': v})
             else:
-                # Convert anything else to string
                 metrics_list.append({'metric_name': k, 'metric_value': str(v)})
         
         if metrics_list:
             metrics_df = pd.DataFrame(metrics_list)
             metrics_df.to_sql('metrics', conn, if_exists='replace', index=False)
             print(f"   Saved {len(metrics_list)} metrics to database")
-        else:
-            print("   No metrics to save")
         
-        # Save materialized views
+        # Save materialized views - FIXED: Convert problematic types
         for name, df in self.optimized_views.items():
-            df.to_sql(name, conn, if_exists='replace', index=False)
+            # Make a copy to avoid modifying original
+            df_clean = df.copy()
+            
+            # Convert period/datetime columns to string
+            for col in df_clean.columns:
+                if df_clean[col].dtype.name == 'period[M]':
+                    df_clean[col] = df_clean[col].astype(str)
+                elif df_clean[col].dtype.name == 'datetime64[ns]':
+                    df_clean[col] = df_clean[col].astype(str)
+                elif df_clean[col].dtype.name == 'object':
+                    # Try to convert any pandas Period objects
+                    try:
+                        if len(df_clean[col]) > 0 and hasattr(df_clean[col].iloc[0], 'strftime'):
+                            df_clean[col] = df_clean[col].astype(str)
+                    except:
+                        pass
+            
+            df_clean.to_sql(name, conn, if_exists='replace', index=False)
+            print(f"   Saved view: {name}")
         
         conn.close()
         print(f"\nDatabase saved to {self.data_path}analytics.db")
