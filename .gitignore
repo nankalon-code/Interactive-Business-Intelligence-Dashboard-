@@ -1,0 +1,33 @@
+# .gitignore - PASTE THIS FIRST BEFORE ANYTHING ELSE
+
+# Data files (DO NOT COMMIT)
+data/
+*.db
+*.sqlite
+*.csv
+
+# Environment secrets
+.env
+.env.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Streamlit
+.streamlit/
