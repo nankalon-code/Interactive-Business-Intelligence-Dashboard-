@@ -4,6 +4,7 @@ import numpy as np
 import os
 import sqlite3
 import time
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
@@ -99,41 +100,41 @@ class BIPipeline:
         # ============================================
         # FINANCIAL MEASURES (8)
         # ============================================
-        measures['total_revenue'] = self.orders['revenue'].sum()
-        measures['total_cost'] = self.orders['cost'].sum()
-        measures['total_discount'] = self.orders['discount'].sum()
+        measures['total_revenue'] = float(self.orders['revenue'].sum())
+        measures['total_cost'] = float(self.orders['cost'].sum())
+        measures['total_discount'] = float(self.orders['discount'].sum())
         measures['net_revenue'] = measures['total_revenue'] - measures['total_discount']
         measures['gross_profit'] = measures['total_revenue'] - measures['total_cost']
-        measures['gross_margin'] = (measures['gross_profit'] / measures['total_revenue']) * 100
-        measures['total_profit'] = self.orders['profit'].sum()
-        measures['profit_margin'] = (measures['total_profit'] / measures['total_revenue']) * 100
+        measures['gross_margin'] = (measures['gross_profit'] / measures['total_revenue']) * 100 if measures['total_revenue'] > 0 else 0
+        measures['total_profit'] = float(self.orders['profit'].sum())
+        measures['profit_margin'] = (measures['total_profit'] / measures['total_revenue']) * 100 if measures['total_revenue'] > 0 else 0
         
         # ============================================
         # SALES MEASURES (7)
         # ============================================
-        measures['total_orders'] = len(self.orders)
-        measures['total_units_sold'] = self.orders['quantity'].sum()
-        measures['avg_order_value'] = measures['total_revenue'] / measures['total_orders']
-        measures['avg_unit_price'] = measures['total_revenue'] / measures['total_units_sold']
-        measures['avg_items_per_order'] = measures['total_units_sold'] / measures['total_orders']
-        measures['unique_customers'] = self.orders['customer_id'].nunique()
-        measures['unique_products_sold'] = self.orders['product_id'].nunique()
+        measures['total_orders'] = int(len(self.orders))
+        measures['total_units_sold'] = int(self.orders['quantity'].sum())
+        measures['avg_order_value'] = measures['total_revenue'] / measures['total_orders'] if measures['total_orders'] > 0 else 0
+        measures['avg_unit_price'] = measures['total_revenue'] / measures['total_units_sold'] if measures['total_units_sold'] > 0 else 0
+        measures['avg_items_per_order'] = measures['total_units_sold'] / measures['total_orders'] if measures['total_orders'] > 0 else 0
+        measures['unique_customers'] = int(self.orders['customer_id'].nunique())
+        measures['unique_products_sold'] = int(self.orders['product_id'].nunique())
         
         # ============================================
         # CUSTOMER MEASURES (8)
         # ============================================
-        measures['customer_lifetime_value'] = measures['total_revenue'] / measures['unique_customers']
+        measures['customer_lifetime_value'] = measures['total_revenue'] / measures['unique_customers'] if measures['unique_customers'] > 0 else 0
         
         # Repeat purchase rate
         customer_orders = self.orders.groupby('customer_id').size()
         repeat_customers = (customer_orders > 1).sum()
-        measures['repeat_purchase_rate'] = (repeat_customers / measures['unique_customers']) * 100
+        measures['repeat_purchase_rate'] = (repeat_customers / measures['unique_customers']) * 100 if measures['unique_customers'] > 0 else 0
         
         # Average purchase frequency
-        measures['avg_purchase_frequency'] = customer_orders.mean()
+        measures['avg_purchase_frequency'] = float(customer_orders.mean()) if len(customer_orders) > 0 else 0
         
         # Customer acquisition cost
-        total_marketing_spend = self.marketing['spend'].sum() if self.marketing is not None else 0
+        total_marketing_spend = float(self.marketing['spend'].sum()) if self.marketing is not None else 0
         measures['customer_acquisition_cost'] = total_marketing_spend / measures['unique_customers'] if measures['unique_customers'] > 0 else 0
         
         # New vs returning (last 30 days)
@@ -143,13 +144,13 @@ class BIPipeline:
         recent_customers = recent_orders['customer_id'].unique()
         first_orders = self.orders.groupby('customer_id')['order_date'].min()
         new_customers = [c for c in recent_customers if first_orders.get(c, today) >= last_30_days]
-        measures['new_customers_last_30d'] = len(new_customers)
-        measures['returning_customers_last_30d'] = len(recent_customers) - len(new_customers)
+        measures['new_customers_last_30d'] = int(len(new_customers))
+        measures['returning_customers_last_30d'] = int(len(recent_customers) - len(new_customers))
         
         # Churn rate (no purchase in 90 days)
         last_orders = self.orders.groupby('customer_id')['order_date'].max()
         churned = (last_orders < (today - timedelta(days=90))).sum()
-        measures['churn_rate'] = (churned / measures['unique_customers']) * 100
+        measures['churn_rate'] = (churned / measures['unique_customers']) * 100 if measures['unique_customers'] > 0 else 0
         
         # ============================================
         # TIME INTELLIGENCE MEASURES (9)
@@ -163,7 +164,7 @@ class BIPipeline:
             previous_12m = monthly_revenue.iloc[-24:-12].sum() if len(monthly_revenue) >= 24 else last_12m
             measures['revenue_yoy_growth'] = ((last_12m - previous_12m) / previous_12m) * 100 if previous_12m > 0 else 0
         else:
-            measures['revenue_yoy_growth'] = 0
+            measures['revenue_yoy_growth'] = 0.0
         
         # Month over Month growth
         if len(monthly_revenue) >= 2:
@@ -171,133 +172,162 @@ class BIPipeline:
             previous_month = monthly_revenue.iloc[-2]
             measures['revenue_mom_growth'] = ((current_month - previous_month) / previous_month) * 100 if previous_month > 0 else 0
         else:
-            measures['revenue_mom_growth'] = 0
+            measures['revenue_mom_growth'] = 0.0
         
         # Rolling averages (7, 30, 90 days)
         daily_revenue = self.orders.groupby('order_date')['revenue'].sum()
-        measures['rolling_7d_avg'] = daily_revenue.tail(7).mean() if len(daily_revenue) >= 7 else 0
-        measures['rolling_30d_avg'] = daily_revenue.tail(30).mean() if len(daily_revenue) >= 30 else 0
-        measures['rolling_90d_avg'] = daily_revenue.tail(90).mean() if len(daily_revenue) >= 90 else 0
+        measures['rolling_7d_avg'] = float(daily_revenue.tail(7).mean()) if len(daily_revenue) >= 7 else 0
+        measures['rolling_30d_avg'] = float(daily_revenue.tail(30).mean()) if len(daily_revenue) >= 30 else 0
+        measures['rolling_90d_avg'] = float(daily_revenue.tail(90).mean()) if len(daily_revenue) >= 90 else 0
         
         # Year to Date
         current_year = datetime.now().year
         ytd_orders = self.orders[self.orders['order_date'].dt.year == current_year]
-        measures['revenue_ytd'] = ytd_orders['revenue'].sum()
-        measures['orders_ytd'] = len(ytd_orders)
+        measures['revenue_ytd'] = float(ytd_orders['revenue'].sum())
+        measures['orders_ytd'] = int(len(ytd_orders))
         
         # Previous Year to Date
         last_year_ytd = self.orders[
             (self.orders['order_date'].dt.year == current_year - 1) &
             (self.orders['order_date'].dt.dayofyear <= datetime.now().timetuple().tm_yday)
         ]
-        measures['revenue_pytd'] = last_year_ytd['revenue'].sum()
+        measures['revenue_pytd'] = float(last_year_ytd['revenue'].sum()) if len(last_year_ytd) > 0 else 0
         
         # ============================================
         # PRODUCT MEASURES (6)
         # ============================================
         product_revenue = self.orders.groupby('product_id')['revenue'].sum()
-        measures['total_products_available'] = len(self.products)
-        measures['top_product_revenue'] = product_revenue.max()
-        measures['top_product_id'] = product_revenue.idxmax()
+        measures['total_products_available'] = int(len(self.products))
+        measures['top_product_revenue'] = float(product_revenue.max()) if len(product_revenue) > 0 else 0
+        measures['top_product_id'] = int(product_revenue.idxmax()) if len(product_revenue) > 0 else 0
         
         # Pareto (80/20) analysis
-        sorted_revenue = product_revenue.sort_values(ascending=False)
-        cumulative = sorted_revenue.cumsum()
-        pareto_threshold = measures['total_revenue'] * 0.8
-        products_for_80 = (cumulative <= pareto_threshold).sum()
-        measures['pareto_80_20_ratio'] = (products_for_80 / len(product_revenue)) * 100
+        if len(product_revenue) > 0:
+            sorted_revenue = product_revenue.sort_values(ascending=False)
+            cumulative = sorted_revenue.cumsum()
+            pareto_threshold = measures['total_revenue'] * 0.8
+            products_for_80 = (cumulative <= pareto_threshold).sum()
+            measures['pareto_80_20_ratio'] = (products_for_80 / len(product_revenue)) * 100
+        else:
+            measures['pareto_80_20_ratio'] = 0
         
         # Top 10% concentration
-        top_10_percent = int(len(product_revenue) * 0.1)
-        measures['top_10_percent_revenue'] = sorted_revenue.head(top_10_percent).sum()
-        measures['revenue_concentration'] = (measures['top_10_percent_revenue'] / measures['total_revenue']) * 100
+        if len(product_revenue) > 0:
+            top_10_percent = int(len(product_revenue) * 0.1)
+            if top_10_percent > 0:
+                top_10_revenue = product_revenue.nlargest(top_10_percent).sum()
+                measures['top_10_percent_revenue'] = float(top_10_revenue)
+                measures['revenue_concentration'] = (top_10_revenue / measures['total_revenue']) * 100 if measures['total_revenue'] > 0 else 0
+            else:
+                measures['top_10_percent_revenue'] = 0
+                measures['revenue_concentration'] = 0
+        else:
+            measures['top_10_percent_revenue'] = 0
+            measures['revenue_concentration'] = 0
         
         # Category performance
         orders_with_cat = self.orders.merge(self.products[['product_id', 'category']], on='product_id')
         category_revenue = orders_with_cat.groupby('category')['revenue'].sum()
-        measures['best_category'] = category_revenue.idxmax()
-        measures['best_category_revenue_pct'] = (category_revenue.max() / measures['total_revenue']) * 100
-        measures['category_count'] = len(category_revenue)
+        if len(category_revenue) > 0:
+            measures['best_category'] = str(category_revenue.idxmax())
+            measures['best_category_revenue_pct'] = (category_revenue.max() / measures['total_revenue']) * 100 if measures['total_revenue'] > 0 else 0
+        else:
+            measures['best_category'] = "Unknown"
+            measures['best_category_revenue_pct'] = 0
+        measures['category_count'] = int(len(category_revenue))
         
         # ============================================
         # SEGMENT MEASURES (5)
         # ============================================
         orders_with_seg = self.orders.merge(self.customers[['customer_id', 'segment']], on='customer_id')
         segment_revenue = orders_with_seg.groupby('segment')['revenue'].sum()
-        segment_customers = self.customers.groupby('segment')['customer_id'].count()
+        total_rev = measures['total_revenue']
         
-        measures['premium_segment_revenue_pct'] = (segment_revenue.get('Premium', 0) / measures['total_revenue']) * 100
-        measures['gold_segment_revenue_pct'] = (segment_revenue.get('Gold', 0) / measures['total_revenue']) * 100
-        measures['silver_segment_revenue_pct'] = (segment_revenue.get('Silver', 0) / measures['total_revenue']) * 100
-        measures['bronze_segment_revenue_pct'] = (segment_revenue.get('Bronze', 0) / measures['total_revenue']) * 100
+        measures['premium_segment_revenue_pct'] = float((segment_revenue.get('Premium', 0) / total_rev) * 100) if total_rev > 0 else 0
+        measures['gold_segment_revenue_pct'] = float((segment_revenue.get('Gold', 0) / total_rev) * 100) if total_rev > 0 else 0
+        measures['silver_segment_revenue_pct'] = float((segment_revenue.get('Silver', 0) / total_rev) * 100) if total_rev > 0 else 0
+        measures['bronze_segment_revenue_pct'] = float((segment_revenue.get('Bronze', 0) / total_rev) * 100) if total_rev > 0 else 0
         
         # Segment average order value
         segment_aov = orders_with_seg.groupby('segment')['revenue'].mean()
-        measures['premium_aov'] = segment_aov.get('Premium', 0)
+        measures['premium_aov'] = float(segment_aov.get('Premium', 0))
         
         # ============================================
         # OPERATIONAL MEASURES (5)
         # ============================================
-        measures['avg_daily_revenue'] = measures['total_revenue'] / self.orders['order_date'].nunique()
+        measures['avg_daily_revenue'] = measures['total_revenue'] / self.orders['order_date'].nunique() if self.orders['order_date'].nunique() > 0 else 0
         
         # Peak hour analysis
         self.orders['hour'] = self.orders['order_timestamp'].dt.hour
         hourly_orders = self.orders.groupby('hour')['order_id'].count()
-        measures['peak_order_hour'] = hourly_orders.idxmax()
-        measures['peak_hour_volume'] = hourly_orders.max()
+        if len(hourly_orders) > 0:
+            measures['peak_order_hour'] = int(hourly_orders.idxmax())
+            measures['peak_hour_volume'] = int(hourly_orders.max())
+        else:
+            measures['peak_order_hour'] = 0
+            measures['peak_hour_volume'] = 0
         
         # Weekend vs weekday performance
         self.orders['is_weekend'] = self.orders['order_date'].dt.dayofweek >= 5
         weekend_revenue = self.orders[self.orders['is_weekend']]['revenue'].sum()
-        weekday_revenue = self.orders[~self.orders['is_weekend']]['revenue'].sum()
-        measures['weekend_revenue_pct'] = (weekend_revenue / measures['total_revenue']) * 100
+        measures['weekend_revenue_pct'] = float((weekend_revenue / measures['total_revenue']) * 100) if measures['total_revenue'] > 0 else 0
         
         # Best month
         monthly_performance = self.orders.groupby(self.orders['order_date'].dt.month)['revenue'].sum()
-        measures['best_month'] = monthly_performance.idxmax()
-        measures['best_month_revenue'] = monthly_performance.max()
+        if len(monthly_performance) > 0:
+            measures['best_month'] = int(monthly_performance.idxmax())
+            measures['best_month_revenue'] = float(monthly_performance.max())
+        else:
+            measures['best_month'] = 0
+            measures['best_month_revenue'] = 0
         
         # Seasonality factor
-        peak_month_avg = monthly_performance.max()
-        avg_monthly = monthly_performance.mean()
-        measures['seasonality_factor'] = peak_month_avg / avg_monthly if avg_monthly > 0 else 1
+        if len(monthly_performance) > 0:
+            peak_month_avg = monthly_performance.max()
+            avg_monthly = monthly_performance.mean()
+            measures['seasonality_factor'] = peak_month_avg / avg_monthly if avg_monthly > 0 else 1
+        else:
+            measures['seasonality_factor'] = 1.0
         
         # ============================================
         # INVENTORY MEASURES (3)
         # ============================================
-        if self.inventory is not None:
+        if self.inventory is not None and len(self.inventory) > 0:
             avg_stock = self.inventory.groupby('product_id')['stock_level'].mean()
-            measures['avg_inventory_value'] = (avg_stock * self.products.set_index('product_id')['cost_price']).sum()
-            measures['stockout_rate'] = (self.inventory['stock_level'] == 0).mean() * 100
+            product_costs = self.products.set_index('product_id')['cost_price']
+            measures['avg_inventory_value'] = float((avg_stock * product_costs).sum())
+            measures['stockout_rate'] = float((self.inventory['stock_level'] == 0).mean() * 100)
             measures['inventory_turnover'] = measures['total_units_sold'] / avg_stock.mean() if avg_stock.mean() > 0 else 0
         else:
-            measures['avg_inventory_value'] = 0
-            measures['stockout_rate'] = 0
-            measures['inventory_turnover'] = 0
+            measures['avg_inventory_value'] = 0.0
+            measures['stockout_rate'] = 0.0
+            measures['inventory_turnover'] = 0.0
         
         # ============================================
-        # RETURN MEASURES (3)
+        # RETURN MEASURES (2 - skip dict)
         # ============================================
-        if self.returns is not None:
-            measures['total_return_amount'] = self.returns['refund_amount'].sum()
-            measures['return_rate'] = (len(self.returns) / len(self.orders)) * 100
-            measures['return_rate_by_reason'] = self.returns['reason'].value_counts().to_dict()
+        if self.returns is not None and len(self.returns) > 0:
+            measures['total_return_amount'] = float(self.returns['refund_amount'].sum())
+            measures['return_rate'] = (len(self.returns) / len(self.orders)) * 100 if len(self.orders) > 0 else 0
+            # Skip return_rate_by_reason because it's a dict
         else:
-            measures['total_return_amount'] = 0
-            measures['return_rate'] = 0
-            measures['return_rate_by_reason'] = {}
+            measures['total_return_amount'] = 0.0
+            measures['return_rate'] = 0.0
         
         # ============================================
         # MARKETING MEASURES (3)
         # ============================================
-        if self.marketing is not None:
-            measures['total_marketing_spend'] = self.marketing['spend'].sum()
-            measures['marketing_roi'] = ((measures['total_revenue'] - measures['total_marketing_spend']) / measures['total_marketing_spend']) * 100 if measures['total_marketing_spend'] > 0 else 0
+        if self.marketing is not None and len(self.marketing) > 0:
+            measures['total_marketing_spend'] = float(self.marketing['spend'].sum())
+            if measures['total_marketing_spend'] > 0:
+                measures['marketing_roi'] = ((measures['total_revenue'] - measures['total_marketing_spend']) / measures['total_marketing_spend']) * 100
+            else:
+                measures['marketing_roi'] = 0.0
             measures['cac_ltv_ratio'] = measures['customer_acquisition_cost'] / measures['customer_lifetime_value'] if measures['customer_lifetime_value'] > 0 else 0
         else:
-            measures['total_marketing_spend'] = 0
-            measures['marketing_roi'] = 0
-            measures['cac_ltv_ratio'] = 0
+            measures['total_marketing_spend'] = 0.0
+            measures['marketing_roi'] = 0.0
+            measures['cac_ltv_ratio'] = 0.0
         
         # ============================================
         # COHORT MEASURES (3)
@@ -305,13 +335,17 @@ class BIPipeline:
         # Customer cohorts by signup month
         self.customers['cohort_month'] = self.customers['signup_date'].dt.to_period('M')
         cohort_sizes = self.customers.groupby('cohort_month')['customer_id'].count()
-        measures['total_cohorts'] = len(cohort_sizes)
-        measures['largest_cohort'] = cohort_sizes.idxmax()
-        measures['largest_cohort_size'] = cohort_sizes.max()
+        measures['total_cohorts'] = int(len(cohort_sizes))
+        if len(cohort_sizes) > 0:
+            measures['largest_cohort'] = str(cohort_sizes.idxmax())
+            measures['largest_cohort_size'] = int(cohort_sizes.max())
+        else:
+            measures['largest_cohort'] = "Unknown"
+            measures['largest_cohort_size'] = 0
         
         self.results = measures
         
-        # Count measures
+        # Count measures (excluding dicts)
         measure_count = len([k for k, v in measures.items() if not isinstance(v, dict)])
         print(f"   Calculated {measure_count} measures")
         
@@ -366,7 +400,7 @@ class BIPipeline:
         print(f"   Created {len(self.optimized_views)} materialized views")
     
     def save_to_database(self):
-        """Save all processed data to SQLite"""
+        """Save all processed data to SQLite - FIXED VERSION"""
         conn = sqlite3.connect(os.path.join(self.data_path, 'analytics.db'))
         
         # Save fact and dimension tables
@@ -375,12 +409,25 @@ class BIPipeline:
         self.dim_product.to_sql('dim_product', conn, if_exists='replace', index=False)
         self.dim_date.to_sql('dim_date', conn, if_exists='replace', index=False)
         
-        # Save metrics
-        metrics_df = pd.DataFrame([
-            {'metric_name': k, 'metric_value': v} for k, v in self.results.items()
-            if not isinstance(v, dict)
-        ])
-        metrics_df.to_sql('metrics', conn, if_exists='replace', index=False)
+        # Save metrics - FIXED: Convert everything to simple types
+        metrics_list = []
+        for k, v in self.results.items():
+            # Skip complex types that cause SQLite errors
+            if isinstance(v, (dict, list, pd.Series, pd.DataFrame)):
+                continue
+            # Convert to appropriate type
+            if isinstance(v, (int, float, str, bool)):
+                metrics_list.append({'metric_name': k, 'metric_value': v})
+            else:
+                # Convert anything else to string
+                metrics_list.append({'metric_name': k, 'metric_value': str(v)})
+        
+        if metrics_list:
+            metrics_df = pd.DataFrame(metrics_list)
+            metrics_df.to_sql('metrics', conn, if_exists='replace', index=False)
+            print(f"   Saved {len(metrics_list)} metrics to database")
+        else:
+            print("   No metrics to save")
         
         # Save materialized views
         for name, df in self.optimized_views.items():
